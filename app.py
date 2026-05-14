@@ -3,46 +3,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.signal import butter, filtfilt, find_peaks
-import io
-import time
 
 fs = 1000
-
-# ------------------------------------------------------------
-# 🎨 CSS
-# ------------------------------------------------------------
-st.markdown("""
-<style>
-.metric-card {
-    padding: 15px;
-    border-radius: 12px;
-    text-align: center;
-    margin-bottom:10px;
-}
-.rest { background-color: #FFE5E5; }
-.post { background-color: #E3F2FD; }
-</style>
-""", unsafe_allow_html=True)
-
-# ------------------------------------------------------------
-# 🧭 NAVIGATION (TOP LEVEL ONLY)
-# ------------------------------------------------------------
-page = st.sidebar.radio(
-    "Navigation",
-    ["🏠 Home", "📊 Analysis", "📈 Comparison", "ℹ️ About"]
-)
-
-# ------------------------------------------------------------
-# 🫀 SIDEBAR INFO (SAFE OUTSIDE)
-# ------------------------------------------------------------
-st.sidebar.title("🫀 Cardiac Info")
-st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/3/3a/Heart_diagram-en.svg")
-st.sidebar.write("""
-**PEP** – Pre-Ejection Period  
-**LVET** – Left Ventricular Ejection Time  
-**IVCT** – Isovolumetric Contraction Time  
-**IVRT** – Isovolumetric Relaxation Time  
-""")
 
 # ------------------------------------------------------------
 # FILTER
@@ -52,153 +14,197 @@ def bandpass(x, low, high):
     return filtfilt(b, a, x)
 
 # ------------------------------------------------------------
-# DETECTION
+# DETECTION FUNCTION
 # ------------------------------------------------------------
 def detect_and_plot(df, title):
 
     ecg = bandpass(df["II"].values, 5, 25)
     scg = bandpass(df["az"].values, 7, 30)
 
-    r_peaks, _ = find_peaks(ecg, distance=int(0.45*fs), prominence=0.6*np.std(ecg))
+    # ECG R peak detection
+    r_peaks, _ = find_peaks(
+        ecg,
+        distance=int(0.45*fs),
+        prominence=0.6*np.std(ecg)
+    )
 
-    R_sec = r_peaks / fs
-    HR = 60 / np.mean(np.diff(R_sec)) if len(R_sec) > 1 else np.nan
-
+    # Q peak detection
     q_peaks = []
     for r in r_peaks:
         start = max(r - int(0.05*fs), 0)
         end = r - int(0.015*fs)
-        q_peaks.append(start + np.argmin(ecg[start:end]) if end > start else np.nan)
+
+        if end > start:
+            q_peaks.append(start + np.argmin(ecg[start:end]))
+        else:
+            q_peaks.append(np.nan)
 
     q_peaks = np.array(q_peaks)
 
-    AO = []
-    AC = []
+    # SCG detection
+    MC, AO, AC, MO = [], [], [], []
 
     for i in range(len(r_peaks)-1):
+
         r = r_peaks[i]
         next_r = r_peaks[i+1]
+
         beat = scg[r:next_r]
 
         if len(beat) < int(0.3*fs):
             continue
 
-        ao = r + np.argmax(beat[int(0.04*fs):int(0.18*fs)]) + int(0.04*fs)
-        ac = r + np.argmin(beat[int(0.2*fs):int(0.45*fs)]) + int(0.2*fs)
+        mc = r + np.argmin(beat[0:int(0.06*fs)])
 
+        ao_win = beat[int(0.04*fs):int(0.18*fs)]
+        pos_peaks, _ = find_peaks(ao_win, prominence=0.25*np.std(ao_win))
+
+        if len(pos_peaks) == 0:
+            continue
+
+        ao_rel = int(0.04*fs) + pos_peaks[np.argmax(ao_win[pos_peaks])]
+        ao = r + ao_rel
+
+        ac = np.nan
+        ac_rel = None
+
+        ac_start = ao_rel + int(0.05*fs)
+        ac_end = min(int(0.45*fs), len(beat))
+
+        if ac_start < ac_end:
+
+            ac_win = beat[ac_start:ac_end]
+
+            neg_peaks, props = find_peaks(
+                -ac_win,
+                prominence=0.2*np.std(ac_win)
+            )
+
+            if len(neg_peaks) > 0:
+
+                depth = -ac_win[neg_peaks]
+                prom = props["prominences"]
+
+                score = depth*0.7 + prom*0.3
+                best_idx = neg_peaks[np.argmax(score)]
+
+                ac_rel = ac_start + best_idx
+                ac = r + ac_rel
+
+        mo = np.nan
+
+        if ac_rel is not None:
+
+            mo_start = ac_rel + int(0.02*fs)
+            mo_end = min(ac_rel + int(0.12*fs), len(beat))
+
+            if mo_start < mo_end:
+
+                mo_win = beat[mo_start:mo_end]
+
+                pos_peaks, _ = find_peaks(
+                    mo_win,
+                    prominence=0.15*np.std(mo_win)
+                )
+
+                if len(pos_peaks) > 0:
+
+                    best_idx = pos_peaks[np.argmax(mo_win[pos_peaks])]
+                    mo_rel = mo_start + best_idx
+                    mo = r + mo_rel
+
+        MC.append(mc)
         AO.append(ao)
         AC.append(ac)
+        MO.append(mo)
 
-    min_len = min(len(AO), len(AC), len(q_peaks))
+    min_len = min(len(MC), len(AO), len(AC), len(MO), len(r_peaks), len(q_peaks))
 
-    PEP = (np.array(AO[:min_len]) - np.array(q_peaks[:min_len])) / fs
-    LVET = (np.array(AC[:min_len]) - np.array(AO[:min_len])) / fs
+    R = r_peaks[:min_len]
+    Q = q_peaks[:min_len]
+    MC = np.array(MC[:min_len])
+    AO = np.array(AO[:min_len])
+    AC = np.array(AC[:min_len])
+    MO = np.array(MO[:min_len])
+
+    R_sec = R / fs
+    Q_sec = Q / fs
+    MC_sec = MC / fs
+    AO_sec = AO / fs
+    AC_sec = AC / fs
+    MO_sec = MO / fs
+
+    # Cardiac Time Intervals
+    PEP = AO_sec - Q_sec
+    LVET = AC_sec - AO_sec
+    IVCT = AO_sec - MC_sec
+    IVRT = MO_sec - AC_sec
 
     table = pd.DataFrame({
         "PEP_sec": PEP,
-        "LVET_sec": LVET
+        "LVET_sec": LVET,
+        "IVCT_sec": IVCT,
+        "IVRT_sec": IVRT
     })
 
-    fig, ax = plt.subplots()
-    ax.plot(ecg[:10000])
-    ax.set_title(title)
+    # Plot
+    N = int(10*fs)
+    t = np.arange(N)/fs
 
-    return table, fig, HR
+    fig, ax = plt.subplots(2,1,figsize=(12,7))
 
-# ------------------------------------------------------------
-# 🏠 HOME
-# ------------------------------------------------------------
-if page == "🏠 Home":
+    ax[0].plot(t, ecg[:N])
+    ax[0].scatter(R_sec[R_sec<10], ecg[R[R<N]], c='red')
+    ax[0].scatter(Q_sec[Q_sec<10], ecg[Q[Q<N].astype(int)], c='black')
+    ax[0].set_title(title + " ECG")
 
-    st.markdown("""
-    <h1 style='text-align: center; color: #E63946;'>
-    ❤️ Cardiac Time Interval Analyzer
-    </h1>
-    """, unsafe_allow_html=True)
+    ax[1].plot(t, scg[:N])
 
-    st.markdown("""
-    <div style="text-align:center;">
-    <img src="https://i.gifer.com/7efs.gif" width="300">
-    </div>
-    """, unsafe_allow_html=True)
+    for arr,col in [(MC_sec,'blue'),(AO_sec,'orange'),(AC_sec,'green'),(MO_sec,'purple')]:
+        valid = arr[~np.isnan(arr)]
+        valid = valid[valid < 10]
+        ax[1].scatter(valid, scg[(valid*fs).astype(int)], c=col)
 
-    st.markdown("## Welcome 👋")
-    st.write("Analyze ECG + SCG signals to estimate cardiac intervals.")
+    ax[1].set_title(title + " SCG")
 
-# ------------------------------------------------------------
-# 📊 ANALYSIS
-# ------------------------------------------------------------
-elif page == "📊 Analysis":
+    plt.tight_layout()
 
-    st.header("📊 Analysis")
+    return table, fig
 
-    rest_file = st.file_uploader("Upload REST Excel", type=["xlsx"])
-    post_file = st.file_uploader("Upload POST Excel", type=["xlsx"])
-
-    if rest_file and post_file:
-
-        progress = st.progress(0)
-        for i in range(100):
-            time.sleep(0.01)
-            progress.progress(i+1)
-
-        rest_df = pd.read_excel(rest_file)
-        post_df = pd.read_excel(post_file)
-
-        tab1, tab2 = st.tabs(["REST", "POST"])
-
-        with tab1:
-            rest_table, rest_fig, rest_hr = detect_and_plot(rest_df, "REST")
-            st.markdown(f'<div class="metric-card rest"><h3>REST HR</h3><h2>{round(rest_hr,2)}</h2></div>', unsafe_allow_html=True)
-            st.pyplot(rest_fig)
-            st.dataframe(rest_table)
-
-        with tab2:
-            post_table, post_fig, post_hr = detect_and_plot(post_df, "POST")
-            st.markdown(f'<div class="metric-card post"><h3>POST HR</h3><h2>{round(post_hr,2)}</h2></div>', unsafe_allow_html=True)
-            st.pyplot(post_fig)
-            st.dataframe(post_table)
-
-        # SAVE STATE
-        st.session_state.rest_table = rest_table
-        st.session_state.post_table = post_table
 
 # ------------------------------------------------------------
-# 📈 COMPARISON
+# STREAMLIT GUI
 # ------------------------------------------------------------
-elif page == "📈 Comparison":
 
-    st.header("📈 Comparison")
+st.title("ECG-SCG Cardiac Time Interval Detection")
 
-    if "rest_table" in st.session_state:
+st.write("Upload REST and POST exercise datasets")
 
-        rest_table = st.session_state.rest_table
-        post_table = st.session_state.post_table
+rest_file = st.file_uploader("Upload REST Excel", type=["xlsx"])
+post_file = st.file_uploader("Upload POST Excel", type=["xlsx"])
 
-        rest_mean = rest_table.mean()
-        post_mean = post_table.mean()
+if rest_file and post_file:
 
-        st.bar_chart(pd.DataFrame({
-            "REST": rest_mean,
-            "POST": post_mean
-        }))
+    rest_df = pd.read_excel(rest_file)
+    post_df = pd.read_excel(post_file)
 
-    else:
-        st.warning("Run analysis first")
+    st.subheader("REST SIGNAL ANALYSIS")
 
-# ------------------------------------------------------------
-# ℹ️ ABOUT
-# ------------------------------------------------------------
-elif page == "ℹ️ About":
+    rest_table, rest_fig = detect_and_plot(rest_df,"REST")
 
-    st.header("ℹ️ About")
+    st.pyplot(rest_fig)
+    st.dataframe(rest_table)
 
-    st.write("""
-    Biomedical dashboard for cardiac interval estimation using ECG + SCG.
+    st.subheader("POST EXERCISE SIGNAL ANALYSIS")
 
-    Features:
-    - Signal processing
-    - Peak detection
-    - CTI estimation
-    - Comparison dashboard
-    """)
+    post_table, post_fig = detect_and_plot(post_df,"POST")
+
+    st.pyplot(post_fig)
+    st.dataframe(post_table)
+
+    final = pd.concat([rest_table, post_table], ignore_index=True)
+
+    final.to_excel("CTI_RESULTS.xlsx", index=False)
+
+    with open("CTI_RESULTS.xlsx","rb") as f:
+        st.download_button("Download Results Excel",f,"CTI_RESULTS.xlsx")
