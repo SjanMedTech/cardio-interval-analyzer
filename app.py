@@ -37,19 +37,7 @@ body {
 """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# ❤️ HEADER
-# ------------------------------------------------------------
-st.markdown("""
-<h1 style='text-align: center; color: #E63946;'>
-❤️ Cardiac Time Interval Analyzer
-</h1>
-<p style='text-align: center; color: #1D3557; font-size:18px;'>
-ECG + SCG based Cardiac Dysfunction Assessment
-</p>
-""", unsafe_allow_html=True)
-
-# ------------------------------------------------------------
-# 🚀 WELCOME SCREEN (POP-UP STYLE)
+# 🚀 WELCOME SCREEN (FIRST PAGE)
 # ------------------------------------------------------------
 if "started" not in st.session_state:
     st.session_state.started = False
@@ -82,6 +70,24 @@ if not st.session_state.started:
         st.session_state.started = True
 
     st.stop()
+
+# ------------------------------------------------------------
+# ❤️ MAIN HEADER (ONLY AFTER ENTER)
+# ------------------------------------------------------------
+st.markdown("""
+<h1 style='text-align: center; color: #E63946;'>
+❤️ Cardiac Time Interval Analyzer
+</h1>
+<p style='text-align: center; color: #1D3557; font-size:18px;'>
+ECG + SCG based Cardiac Dysfunction Assessment
+</p>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+<div style="text-align:center;">
+<img src="https://i.gifer.com/7efs.gif" width="250">
+</div>
+""", unsafe_allow_html=True)
 
 # ------------------------------------------------------------
 # SIDEBAR
@@ -124,7 +130,7 @@ def detect_and_plot(df, title):
 
     q_peaks = np.array(q_peaks)
 
-    MC, AO, AC, MO = [], [], [], []
+    MC, AO = [], []
 
     for i in range(len(r_peaks)-1):
         r = r_peaks[i]
@@ -138,6 +144,7 @@ def detect_and_plot(df, title):
 
         ao_win = beat[int(0.04*fs):int(0.18*fs)]
         pos_peaks, _ = find_peaks(ao_win, prominence=0.25*np.std(ao_win))
+
         if len(pos_peaks) == 0:
             continue
 
