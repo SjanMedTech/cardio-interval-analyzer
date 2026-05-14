@@ -8,7 +8,42 @@ import io
 fs = 1000
 
 # ------------------------------------------------------------
-# ❤️ HEADER (REPLACES st.title)
+# 🎨 CUSTOM CSS (DASHBOARD LOOK)
+# ------------------------------------------------------------
+st.markdown("""
+<style>
+body {
+    background-color: #F4F8FB;
+}
+.card {
+    padding: 15px;
+    border-radius: 12px;
+    background-color: white;
+    box-shadow: 0px 4px 12px rgba(0,0,0,0.08);
+    margin-bottom: 15px;
+}
+.metric-card {
+    padding: 15px;
+    border-radius: 12px;
+    text-align: center;
+}
+.rest {
+    background-color: #FFE5E5;
+}
+.post {
+    background-color: #E3F2FD;
+}
+.section-title {
+    font-size:22px;
+    font-weight:600;
+    margin-top:20px;
+    color:#1D3557;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ------------------------------------------------------------
+# ❤️ HEADER
 # ------------------------------------------------------------
 st.markdown("""
 <h1 style='text-align: center; color: #E63946;'>
@@ -19,17 +54,17 @@ ECG + SCG based Cardiac Dysfunction Assessment
 </p>
 """, unsafe_allow_html=True)
 
-# Animated heart (subtle)
+# ECG animation (clean + relevant)
 st.markdown("""
 <div style="text-align:center;">
-<img src="https://media.giphy.com/media/xT0xeJpnrWC4XWblEk/giphy.gif" width="100">
+<img src="https://i.gifer.com/7efs.gif" width="300">
 </div>
 """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------
 # SIDEBAR
 # ------------------------------------------------------------
-st.sidebar.title("Cardiac Intervals Info")
+st.sidebar.title("🫀 Cardiac Info")
 st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/3/3a/Heart_diagram-en.svg")
 
 st.sidebar.write("""
@@ -152,27 +187,12 @@ def detect_and_plot(df, title):
         "IVRT_sec": IVRT
     })
 
-    # Plot
-    N = int(10*fs)
-    t = np.arange(N)/fs
-
     fig, ax = plt.subplots(2,1,figsize=(12,7))
 
-    ax[0].plot(t, ecg[:N])
-    ax[0].scatter(R_sec[R_sec<10], ecg[R[R<N]], c='red', label="R")
-    ax[0].scatter(Q_sec[Q_sec<10], ecg[Q[Q<N].astype(int)], c='black', label="Q")
-    ax[0].legend()
+    ax[0].plot(ecg[:10000])
     ax[0].set_title(title + " ECG")
 
-    ax[1].plot(t, scg[:N])
-
-    for arr,col,label in [(MC_sec,'blue','MC'),(AO_sec,'orange','AO'),
-                          (AC_sec,'green','AC'),(MO_sec,'purple','MO')]:
-        valid = arr[~np.isnan(arr)]
-        valid = valid[valid < 10]
-        ax[1].scatter(valid, scg[(valid*fs).astype(int)], c=col, label=label)
-
-    ax[1].legend()
+    ax[1].plot(scg[:10000])
     ax[1].set_title(title + " SCG")
 
     plt.tight_layout()
@@ -190,83 +210,40 @@ if rest_file and post_file:
     rest_df = pd.read_excel(rest_file)
     post_df = pd.read_excel(post_file)
 
-    required_cols = ["II", "az"]
+    with st.spinner("Processing..."):
 
-    if not all(col in rest_df.columns for col in required_cols):
-        st.error("REST file must contain columns: II and az")
-        st.stop()
-
-    if not all(col in post_df.columns for col in required_cols):
-        st.error("POST file must contain columns: II and az")
-        st.stop()
-
-    with st.spinner("Processing signals..."):
-
-        # REST
-        st.subheader("REST SIGNAL ANALYSIS")
+        st.markdown('<div class="section-title">REST ANALYSIS</div>', unsafe_allow_html=True)
         rest_table, rest_fig, rest_hr = detect_and_plot(rest_df, "REST")
 
-        st.markdown(f"""
-        <div style="background-color:#FFE5E5;padding:15px;border-radius:10px">
-        <h4 style="color:#E63946;">REST Heart Rate</h4>
-        <h2>{round(rest_hr,2)} bpm</h2>
-        </div>
-        """, unsafe_allow_html=True)
-
+        st.markdown(f'<div class="metric-card rest"><h3>REST HR</h3><h2>{round(rest_hr,2)} bpm</h2></div>', unsafe_allow_html=True)
         st.pyplot(rest_fig)
         st.dataframe(rest_table)
 
-        # POST
-        st.subheader("POST SIGNAL ANALYSIS")
+        st.markdown('<div class="section-title">POST ANALYSIS</div>', unsafe_allow_html=True)
         post_table, post_fig, post_hr = detect_and_plot(post_df, "POST")
 
-        st.markdown(f"""
-        <div style="background-color:#E3F2FD;padding:15px;border-radius:10px">
-        <h4 style="color:#1D3557;">POST Heart Rate</h4>
-        <h2>{round(post_hr,2)} bpm</h2>
-        </div>
-        """, unsafe_allow_html=True)
-
+        st.markdown(f'<div class="metric-card post"><h3>POST HR</h3><h2>{round(post_hr,2)} bpm</h2></div>', unsafe_allow_html=True)
         st.pyplot(post_fig)
         st.dataframe(post_table)
 
-        # COMPARISON
-        st.markdown("### 📊 Cardiac Response Comparison")
+        st.markdown('<div class="section-title">📊 COMPARISON</div>', unsafe_allow_html=True)
 
         rest_mean = rest_table.mean()
         post_mean = post_table.mean()
 
-        comparison_df = pd.DataFrame({
-            "REST": rest_mean,
-            "POST": post_mean
-        })
-
-        st.dataframe(comparison_df)
-
-        delta = post_mean - rest_mean
-        st.subheader("Change (POST - REST)")
-        st.dataframe(delta.to_frame(name="Difference"))
-
-        fig2, ax2 = plt.subplots(figsize=(8,5))
+        fig2, ax2 = plt.subplots()
         x = np.arange(len(rest_mean))
 
-        ax2.bar(x - 0.2, rest_mean, width=0.4, label="REST")
-        ax2.bar(x + 0.2, post_mean, width=0.4, label="POST")
+        ax2.bar(x - 0.2, rest_mean, 0.4, label="REST")
+        ax2.bar(x + 0.2, post_mean, 0.4, label="POST")
 
         ax2.set_xticks(x)
         ax2.set_xticklabels(rest_mean.index)
-        ax2.set_ylabel("Time (seconds)")
-        ax2.set_title("Cardiac Interval Comparison")
         ax2.legend()
 
         st.pyplot(fig2)
 
-        # DOWNLOAD
         output = io.BytesIO()
         pd.concat([rest_table, post_table]).to_excel(output, index=False)
 
-        st.download_button(
-            "Download Results Excel",
-            data=output.getvalue(),
-            file_name="CTI_RESULTS.xlsx"
-        )
+        st.download_button("Download Results", output.getvalue(), "CTI_RESULTS.xlsx")
