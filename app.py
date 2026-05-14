@@ -3,8 +3,20 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.signal import butter, filtfilt, find_peaks
+import io
 
 fs = 1000
+
+# ------------------------------------------------------------
+# SIDEBAR INFO
+# ------------------------------------------------------------
+st.sidebar.title("Cardiac Intervals Info")
+st.sidebar.write("""
+**PEP** – Pre-Ejection Period  
+**LVET** – Left Ventricular Ejection Time  
+**IVCT** – Isovolumetric Contraction Time  
+**IVRT** – Isovolumetric Relaxation Time  
+""")
 
 # ------------------------------------------------------------
 # FILTER
@@ -27,6 +39,13 @@ def detect_and_plot(df, title):
         distance=int(0.45*fs),
         prominence=0.6*np.std(ecg)
     )
+
+    # Heart Rate
+    R_sec = r_peaks / fs
+    if len(R_sec) > 1:
+        HR = 60 / np.mean(np.diff(R_sec))
+    else:
+        HR = np.nan
 
     # Q peak detection
     q_peaks = []
@@ -72,7 +91,6 @@ def detect_and_plot(df, title):
         ac_end = min(int(0.45*fs), len(beat))
 
         if ac_start < ac_end:
-
             ac_win = beat[ac_start:ac_end]
 
             neg_peaks, props = find_peaks(
@@ -81,7 +99,6 @@ def detect_and_plot(df, title):
             )
 
             if len(neg_peaks) > 0:
-
                 depth = -ac_win[neg_peaks]
                 prom = props["prominences"]
 
@@ -94,12 +111,10 @@ def detect_and_plot(df, title):
         mo = np.nan
 
         if ac_rel is not None:
-
             mo_start = ac_rel + int(0.02*fs)
             mo_end = min(ac_rel + int(0.12*fs), len(beat))
 
             if mo_start < mo_end:
-
                 mo_win = beat[mo_start:mo_end]
 
                 pos_peaks, _ = find_peaks(
@@ -108,7 +123,6 @@ def detect_and_plot(df, title):
                 )
 
                 if len(pos_peaks) > 0:
-
                     best_idx = pos_peaks[np.argmax(mo_win[pos_peaks])]
                     mo_rel = mo_start + best_idx
                     mo = r + mo_rel
@@ -154,22 +168,25 @@ def detect_and_plot(df, title):
     fig, ax = plt.subplots(2,1,figsize=(12,7))
 
     ax[0].plot(t, ecg[:N])
-    ax[0].scatter(R_sec[R_sec<10], ecg[R[R<N]], c='red')
-    ax[0].scatter(Q_sec[Q_sec<10], ecg[Q[Q<N].astype(int)], c='black')
+    ax[0].scatter(R_sec[R_sec<10], ecg[R[R<N]], c='red', label="R Peaks")
+    ax[0].scatter(Q_sec[Q_sec<10], ecg[Q[Q<N].astype(int)], c='black', label="Q Peaks")
+    ax[0].legend()
     ax[0].set_title(title + " ECG")
 
     ax[1].plot(t, scg[:N])
 
-    for arr,col in [(MC_sec,'blue'),(AO_sec,'orange'),(AC_sec,'green'),(MO_sec,'purple')]:
+    for arr,col,label in [(MC_sec,'blue','MC'),(AO_sec,'orange','AO'),
+                          (AC_sec,'green','AC'),(MO_sec,'purple','MO')]:
         valid = arr[~np.isnan(arr)]
         valid = valid[valid < 10]
-        ax[1].scatter(valid, scg[(valid*fs).astype(int)], c=col)
+        ax[1].scatter(valid, scg[(valid*fs).astype(int)], c=col, label=label)
 
+    ax[1].legend()
     ax[1].set_title(title + " SCG")
 
     plt.tight_layout()
 
-    return table, fig
+    return table, fig, HR
 
 
 # ------------------------------------------------------------
@@ -177,7 +194,6 @@ def detect_and_plot(df, title):
 # ------------------------------------------------------------
 
 st.title("ECG-SCG Cardiac Time Interval Detection")
-
 st.write("Upload REST and POST exercise datasets")
 
 rest_file = st.file_uploader("Upload REST Excel", type=["xlsx"])
@@ -188,23 +204,41 @@ if rest_file and post_file:
     rest_df = pd.read_excel(rest_file)
     post_df = pd.read_excel(post_file)
 
-    st.subheader("REST SIGNAL ANALYSIS")
+    required_cols = ["II", "az"]
 
-    rest_table, rest_fig = detect_and_plot(rest_df,"REST")
+    if not all(col in rest_df.columns for col in required_cols):
+        st.error("REST file must contain columns: II and az")
+        st.stop()
 
-    st.pyplot(rest_fig)
-    st.dataframe(rest_table)
+    if not all(col in post_df.columns for col in required_cols):
+        st.error("POST file must contain columns: II and az")
+        st.stop()
 
-    st.subheader("POST EXERCISE SIGNAL ANALYSIS")
+    with st.spinner("Processing signals..."):
 
-    post_table, post_fig = detect_and_plot(post_df,"POST")
+        st.subheader("REST SIGNAL ANALYSIS")
+        rest_table, rest_fig, rest_hr = detect_and_plot(rest_df,"REST")
+        st.metric("REST Heart Rate (bpm)", round(rest_hr,2))
+        st.pyplot(rest_fig)
+        st.dataframe(rest_table)
 
-    st.pyplot(post_fig)
-    st.dataframe(post_table)
+        st.subheader("POST EXERCISE SIGNAL ANALYSIS")
+        post_table, post_fig, post_hr = detect_and_plot(post_df,"POST")
+        st.metric("POST Heart Rate (bpm)", round(post_hr,2))
+        st.pyplot(post_fig)
+        st.dataframe(post_table)
 
-    final = pd.concat([rest_table, post_table], ignore_index=True)
+        final = pd.concat([rest_table, post_table], ignore_index=True)
 
-    final.to_excel("CTI_RESULTS.xlsx", index=False)
+        st.subheader("Summary Statistics")
+        st.dataframe(final.describe().loc[["mean","std"]])
 
-    with open("CTI_RESULTS.xlsx","rb") as f:
-        st.download_button("Download Results Excel",f,"CTI_RESULTS.xlsx")
+        # Download (cloud-safe)
+        output = io.BytesIO()
+        final.to_excel(output, index=False)
+
+        st.download_button(
+            "Download Results Excel",
+            data=output.getvalue(),
+            file_name="CTI_RESULTS.xlsx"
+        )
