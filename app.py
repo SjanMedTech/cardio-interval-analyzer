@@ -8,9 +8,30 @@ import io
 fs = 1000
 
 # ------------------------------------------------------------
-# SIDEBAR INFO
+# ❤️ HEADER (REPLACES st.title)
+# ------------------------------------------------------------
+st.markdown("""
+<h1 style='text-align: center; color: #E63946;'>
+❤️ Cardiac Time Interval Analyzer
+</h1>
+<p style='text-align: center; color: #1D3557; font-size:18px;'>
+ECG + SCG based Cardiac Dysfunction Assessment
+</p>
+""", unsafe_allow_html=True)
+
+# Animated heart (subtle)
+st.markdown("""
+<div style="text-align:center;">
+<img src="https://media.giphy.com/media/xT0xeJpnrWC4XWblEk/giphy.gif" width="100">
+</div>
+""", unsafe_allow_html=True)
+
+# ------------------------------------------------------------
+# SIDEBAR
 # ------------------------------------------------------------
 st.sidebar.title("Cardiac Intervals Info")
+st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/3/3a/Heart_diagram-en.svg")
+
 st.sidebar.write("""
 **PEP** – Pre-Ejection Period  
 **LVET** – Left Ventricular Ejection Time  
@@ -158,13 +179,9 @@ def detect_and_plot(df, title):
 
     return table, fig, HR
 
-
 # ------------------------------------------------------------
-# STREAMLIT UI
+# FILE UPLOAD
 # ------------------------------------------------------------
-
-st.title("ECG-SCG Cardiac Time Interval Detection")
-
 rest_file = st.file_uploader("Upload REST Excel", type=["xlsx"])
 post_file = st.file_uploader("Upload POST Excel", type=["xlsx"])
 
@@ -188,25 +205,33 @@ if rest_file and post_file:
         # REST
         st.subheader("REST SIGNAL ANALYSIS")
         rest_table, rest_fig, rest_hr = detect_and_plot(rest_df, "REST")
-        st.metric("REST Heart Rate (bpm)", round(rest_hr,2))
+
+        st.markdown(f"""
+        <div style="background-color:#FFE5E5;padding:15px;border-radius:10px">
+        <h4 style="color:#E63946;">REST Heart Rate</h4>
+        <h2>{round(rest_hr,2)} bpm</h2>
+        </div>
+        """, unsafe_allow_html=True)
+
         st.pyplot(rest_fig)
         st.dataframe(rest_table)
 
         # POST
         st.subheader("POST SIGNAL ANALYSIS")
         post_table, post_fig, post_hr = detect_and_plot(post_df, "POST")
-        st.metric("POST Heart Rate (bpm)", round(post_hr,2))
+
+        st.markdown(f"""
+        <div style="background-color:#E3F2FD;padding:15px;border-radius:10px">
+        <h4 style="color:#1D3557;">POST Heart Rate</h4>
+        <h2>{round(post_hr,2)} bpm</h2>
+        </div>
+        """, unsafe_allow_html=True)
+
         st.pyplot(post_fig)
         st.dataframe(post_table)
 
-        # COMBINE
-        final = pd.concat([rest_table, post_table], ignore_index=True)
-
-        st.subheader("Summary Statistics")
-        st.dataframe(final.describe().loc[["mean","std"]])
-
-        # ------------------ COMPARISON ------------------
-        st.subheader("REST vs POST Comparison")
+        # COMPARISON
+        st.markdown("### 📊 Cardiac Response Comparison")
 
         rest_mean = rest_table.mean()
         post_mean = post_table.mean()
@@ -238,7 +263,7 @@ if rest_file and post_file:
 
         # DOWNLOAD
         output = io.BytesIO()
-        final.to_excel(output, index=False)
+        pd.concat([rest_table, post_table]).to_excel(output, index=False)
 
         st.download_button(
             "Download Results Excel",
