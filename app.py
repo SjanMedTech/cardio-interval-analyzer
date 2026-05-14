@@ -33,41 +33,24 @@ def detect_and_plot(df, title):
     ecg = bandpass(df["II"].values, 5, 25)
     scg = bandpass(df["az"].values, 7, 30)
 
-    # ECG R peak detection
-    r_peaks, _ = find_peaks(
-        ecg,
-        distance=int(0.45*fs),
-        prominence=0.6*np.std(ecg)
-    )
+    r_peaks, _ = find_peaks(ecg, distance=int(0.45*fs), prominence=0.6*np.std(ecg))
 
-    # Heart Rate
     R_sec = r_peaks / fs
-    if len(R_sec) > 1:
-        HR = 60 / np.mean(np.diff(R_sec))
-    else:
-        HR = np.nan
+    HR = 60 / np.mean(np.diff(R_sec)) if len(R_sec) > 1 else np.nan
 
-    # Q peak detection
     q_peaks = []
     for r in r_peaks:
         start = max(r - int(0.05*fs), 0)
         end = r - int(0.015*fs)
-
-        if end > start:
-            q_peaks.append(start + np.argmin(ecg[start:end]))
-        else:
-            q_peaks.append(np.nan)
+        q_peaks.append(start + np.argmin(ecg[start:end]) if end > start else np.nan)
 
     q_peaks = np.array(q_peaks)
 
-    # SCG detection
     MC, AO, AC, MO = [], [], [], []
 
     for i in range(len(r_peaks)-1):
-
         r = r_peaks[i]
         next_r = r_peaks[i+1]
-
         beat = scg[r:next_r]
 
         if len(beat) < int(0.3*fs):
@@ -77,7 +60,6 @@ def detect_and_plot(df, title):
 
         ao_win = beat[int(0.04*fs):int(0.18*fs)]
         pos_peaks, _ = find_peaks(ao_win, prominence=0.25*np.std(ao_win))
-
         if len(pos_peaks) == 0:
             continue
 
@@ -92,35 +74,24 @@ def detect_and_plot(df, title):
 
         if ac_start < ac_end:
             ac_win = beat[ac_start:ac_end]
-
-            neg_peaks, props = find_peaks(
-                -ac_win,
-                prominence=0.2*np.std(ac_win)
-            )
+            neg_peaks, props = find_peaks(-ac_win, prominence=0.2*np.std(ac_win))
 
             if len(neg_peaks) > 0:
                 depth = -ac_win[neg_peaks]
                 prom = props["prominences"]
-
                 score = depth*0.7 + prom*0.3
                 best_idx = neg_peaks[np.argmax(score)]
-
                 ac_rel = ac_start + best_idx
                 ac = r + ac_rel
 
         mo = np.nan
-
         if ac_rel is not None:
             mo_start = ac_rel + int(0.02*fs)
             mo_end = min(ac_rel + int(0.12*fs), len(beat))
 
             if mo_start < mo_end:
                 mo_win = beat[mo_start:mo_end]
-
-                pos_peaks, _ = find_peaks(
-                    mo_win,
-                    prominence=0.15*np.std(mo_win)
-                )
+                pos_peaks, _ = find_peaks(mo_win, prominence=0.15*np.std(mo_win))
 
                 if len(pos_peaks) > 0:
                     best_idx = pos_peaks[np.argmax(mo_win[pos_peaks])]
@@ -148,7 +119,6 @@ def detect_and_plot(df, title):
     AC_sec = AC / fs
     MO_sec = MO / fs
 
-    # Cardiac Time Intervals
     PEP = AO_sec - Q_sec
     LVET = AC_sec - AO_sec
     IVCT = AO_sec - MC_sec
@@ -168,8 +138,8 @@ def detect_and_plot(df, title):
     fig, ax = plt.subplots(2,1,figsize=(12,7))
 
     ax[0].plot(t, ecg[:N])
-    ax[0].scatter(R_sec[R_sec<10], ecg[R[R<N]], c='red', label="R Peaks")
-    ax[0].scatter(Q_sec[Q_sec<10], ecg[Q[Q<N].astype(int)], c='black', label="Q Peaks")
+    ax[0].scatter(R_sec[R_sec<10], ecg[R[R<N]], c='red', label="R")
+    ax[0].scatter(Q_sec[Q_sec<10], ecg[Q[Q<N].astype(int)], c='black', label="Q")
     ax[0].legend()
     ax[0].set_title(title + " ECG")
 
@@ -190,11 +160,10 @@ def detect_and_plot(df, title):
 
 
 # ------------------------------------------------------------
-# STREAMLIT GUI
+# STREAMLIT UI
 # ------------------------------------------------------------
 
 st.title("ECG-SCG Cardiac Time Interval Detection")
-st.write("Upload REST and POST exercise datasets")
 
 rest_file = st.file_uploader("Upload REST Excel", type=["xlsx"])
 post_file = st.file_uploader("Upload POST Excel", type=["xlsx"])
@@ -216,24 +185,58 @@ if rest_file and post_file:
 
     with st.spinner("Processing signals..."):
 
+        # REST
         st.subheader("REST SIGNAL ANALYSIS")
-        rest_table, rest_fig, rest_hr = detect_and_plot(rest_df,"REST")
+        rest_table, rest_fig, rest_hr = detect_and_plot(rest_df, "REST")
         st.metric("REST Heart Rate (bpm)", round(rest_hr,2))
         st.pyplot(rest_fig)
         st.dataframe(rest_table)
 
-        st.subheader("POST EXERCISE SIGNAL ANALYSIS")
-        post_table, post_fig, post_hr = detect_and_plot(post_df,"POST")
+        # POST
+        st.subheader("POST SIGNAL ANALYSIS")
+        post_table, post_fig, post_hr = detect_and_plot(post_df, "POST")
         st.metric("POST Heart Rate (bpm)", round(post_hr,2))
         st.pyplot(post_fig)
         st.dataframe(post_table)
 
+        # COMBINE
         final = pd.concat([rest_table, post_table], ignore_index=True)
 
         st.subheader("Summary Statistics")
         st.dataframe(final.describe().loc[["mean","std"]])
 
-        # Download (cloud-safe)
+        # ------------------ COMPARISON ------------------
+        st.subheader("REST vs POST Comparison")
+
+        rest_mean = rest_table.mean()
+        post_mean = post_table.mean()
+
+        comparison_df = pd.DataFrame({
+            "REST": rest_mean,
+            "POST": post_mean
+        })
+
+        st.dataframe(comparison_df)
+
+        delta = post_mean - rest_mean
+        st.subheader("Change (POST - REST)")
+        st.dataframe(delta.to_frame(name="Difference"))
+
+        fig2, ax2 = plt.subplots(figsize=(8,5))
+        x = np.arange(len(rest_mean))
+
+        ax2.bar(x - 0.2, rest_mean, width=0.4, label="REST")
+        ax2.bar(x + 0.2, post_mean, width=0.4, label="POST")
+
+        ax2.set_xticks(x)
+        ax2.set_xticklabels(rest_mean.index)
+        ax2.set_ylabel("Time (seconds)")
+        ax2.set_title("Cardiac Interval Comparison")
+        ax2.legend()
+
+        st.pyplot(fig2)
+
+        # DOWNLOAD
         output = io.BytesIO()
         final.to_excel(output, index=False)
 
